@@ -14,7 +14,7 @@ local obj = {}
 obj.name = 'SlackNotifier'
 obj.version = '1.0'
 obj.author = 'Chris Zarate <chris@zarate.org>'
-obj.homepage = 'https://github.com/chriszarate/dotfiles'
+obj.homepage = 'https://github.com/chriszarate/SlackNotifier.spoon'
 obj.license = 'MIT - https://opensource.org/licenses/MIT'
 
 -- create the icon
