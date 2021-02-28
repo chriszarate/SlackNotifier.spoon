@@ -93,6 +93,10 @@ end
 --- Returns:
 ---  * self (allow chaining)
 function obj:start(config)
+	if s == nil or s == '' then
+		return self
+	end
+
 	local interval = config.interval or 60
 
 	-- https://api.slack.com/legacy/custom-integrations/legacy-tokens
@@ -125,8 +129,13 @@ end
 --- Returns:
 ---  * self (allow chaining)
 function obj:stop()
-	self.menu:removeFromMenuBar()
-	self.timer:stop()
+	if self.menu then
+		self.menu:removeFromMenuBar()
+	end
+
+	if self.timer then
+		self.timer:stop()
+	end
 
 	return self
 end
