@@ -21,26 +21,26 @@ obj.license = 'MIT - https://opensource.org/licenses/MIT'
 -- http://xqt2.com/asciiIcons.html
 local iconAscii = [[ASCII:
 ............
-............
 ....AD......
-..F.....PQ..
-..I.........
-..........G.
-..........H.
-.K..........
-.N..........
-.........L..
-..BC.....M..
+.........PQ.
+.F..........
+.I..........
+...........G
+...........H
+K...........
+N...........
+..........L.
+..........M.
+.BC.........
 ......SR....
-............
 ............
 ]]
 
 local icon = hs.image.imageFromASCII(iconAscii)
 
--- on click, open slack
+-- on click, clear the count
 local function onClick()
-	hs.application.launchOrFocus('Slack')
+	updateCount(0)
 end
 
 -- update the menu bar
@@ -62,14 +62,12 @@ local function onResponse(status, body)
 	local json = hs.json.decode(body)
 	local count = 0
 
-	-- loop through channels and add up mention_count
-	for _, channel in pairs(json.channels) do
-		count = count + channel.mention_count
-	end
+	-- reminders
+	count = count + json.saved.uncompleted_overdue_count
 
-	-- loop through dms and add up dm_count
-	for _, dm in pairs(json.ims) do
-		count = count + dm.dm_count
+	-- loop through channel badges and add em up
+	for _, badge_count in pairs(json.channel_badges) do
+		count = count + badge_count
 	end
 
 	-- update the menu bar
@@ -78,7 +76,13 @@ end
 
 -- timer callback, fetch response
 local function onInterval()
-	hs.http.asyncGet(obj.fetchUrl, nil, onResponse)
+	local data = 'token=' .. obj.config.workspaceToken
+	local headers = {
+		Cookie = 'd=' .. hs.http.encodeForQuery(obj.config.cookieToken)
+	}
+	local fetchUrl = 'https://slack.com/api/client.counts'
+
+	hs.http.asyncPost(fetchUrl, data, headers, onResponse)
 end
 
 --- SlackNotifier:start(config)
@@ -93,14 +97,9 @@ end
 --- Returns:
 ---  * self (allow chaining)
 function obj:start(config)
-	if s == nil or s == '' then
-		return self
-	end
+	self.config = config
 
 	local interval = config.interval or 60
-
-	-- https://api.slack.com/legacy/custom-integrations/legacy-tokens
-	self.fetchUrl = 'https://slack.com/api/users.counts?token=' .. config.token
 
 	-- create menubar (or restore it)
 	if self.menu then
