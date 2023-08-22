@@ -38,11 +38,6 @@ N...........
 
 local icon = hs.image.imageFromASCII(iconAscii)
 
--- on click, clear the count
-local function onClick()
-	updateCount(0)
-end
-
 -- update the menu bar
 local function updateCount(count)
 	if count > 0 then
@@ -50,6 +45,11 @@ local function updateCount(count)
 	else
 		obj.menu:setTitle('')
 	end
+end
+
+-- on click, clear the count
+local function onClick()
+	updateCount(0)
 end
 
 -- process the response
