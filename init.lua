@@ -36,20 +36,24 @@ N...........
 ............
 ]]
 
-local icon = hs.image.imageFromASCII(iconAscii)
+local activeIcon = hs.image.imageFromASCII(iconAscii)
+local dimmedIcon = hs.image.imageFromASCII(iconAscii,
+	{ { fillColor = { alpha = 0.5 }, strokeColor = { alpha = 0.5 } } })
 
 -- update the menu bar
-local function updateCount(count)
-	if count > 0 then
-		obj.menu:setTitle(count)
+local function updateCount(dmCount, activityCount)
+	if dmCount > 0 then
+		obj.menu:setIcon(activeIcon, true):setTitle(dmCount)
+	elseif activityCount > 0 then
+		obj.menu:setIcon(activeIcon, true):setTitle('')
 	else
-		obj.menu:setTitle('')
+		obj.menu:setIcon(dimmedIcon, true):setTitle('')
 	end
 end
 
 -- on click, clear the count
 local function onClick()
-	updateCount(0)
+	updateCount(0, 0)
 end
 
 -- process the response
@@ -60,18 +64,24 @@ local function onResponse(status, body)
 
 	-- parse json response
 	local json = hs.json.decode(body)
-	local count = 0
 
-	-- reminders
-	count = count + json.saved.uncompleted_overdue_count
+	-- mentions and dms
+	local dmCount = 0
+
+	-- unread threads and reminders
+	local activityCount = json.saved.uncompleted_overdue_count
 
 	-- loop through channel badges and add em up
-	for _, badge_count in pairs(json.channel_badges) do
-		count = count + badge_count
+	for type, badge_count in pairs(json.channel_badges) do
+		if type == 'app_dms' or type == 'thread_unreads' then
+			activityCount = activityCount + badge_count
+		else
+			dmCount = dmCount + badge_count
+		end
 	end
 
 	-- update the menu bar
-	updateCount(count)
+	updateCount(dmCount, activityCount)
 end
 
 -- timer callback, fetch response
@@ -105,7 +115,7 @@ function obj:start(config)
 	if self.menu then
 		self.menu:returnToMenuBar()
 	else
-		self.menu = hs.menubar.new():setClickCallback(onClick):setIcon(icon)
+		self.menu = hs.menubar.new():setClickCallback(onClick)
 	end
 
 	-- set timer to fetch periodically
@@ -113,7 +123,6 @@ function obj:start(config)
 	self.timer:start()
 
 	-- fetch immediately, too
-	updateCount(0)
 	onInterval()
 
 	return self
