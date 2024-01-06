@@ -40,9 +40,25 @@ local activeIcon = hs.image.imageFromASCII(iconAscii)
 local dimmedIcon = hs.image.imageFromASCII(iconAscii,
 	{ { fillColor = { alpha = 0.5 }, strokeColor = { alpha = 0.5 } } })
 
+-- debug helper
+local function tableToString(o)
+	if type(o) == 'table' then
+		local s = '{ '
+		for k, v in pairs(o) do
+			if type(k) ~= 'number' then k = '"' .. k .. '"' end
+			s = s .. '[' .. k .. '] = ' .. tableToString(v) .. ','
+		end
+		return s .. '} '
+	else
+		return tostring(o)
+	end
+end
+
 -- update the menu bar
-local function updateCount(dmCount, activityCount)
-	if dmCount > 0 then
+local function updateCount(dmCount, activityCount, err)
+	if err then
+		obj.menu:setIcon(dimmedIcon, true):setTitle('?')
+	elseif dmCount > 0 then
 		obj.menu:setIcon(activeIcon, true):setTitle(dmCount)
 	elseif activityCount > 0 then
 		obj.menu:setIcon(activeIcon, true):setTitle('')
@@ -53,7 +69,7 @@ end
 
 -- on click, clear the count
 local function onClick()
-	updateCount(0, 0)
+	updateCount(0, 0, false)
 end
 
 -- process the response
@@ -65,11 +81,22 @@ local function onResponse(status, body)
 	-- parse json response
 	local json = hs.json.decode(body)
 
+	-- print('slack response:', tableToString(json))
+
+	if not json.ok then
+		updateCount(0, 0, true)
+		print('SlackNotifier: error: ' .. json.error)
+		return
+	end
+
 	-- mentions and dms
 	local dmCount = 0
 
 	-- unread threads and reminders
-	local activityCount = json.saved.uncompleted_overdue_count
+	local activityCount = 0
+	if (json.saved) then
+		activityCount = json.saved.uncompleted_overdue_count
+	end
 
 	-- loop through channel badges and add em up
 	for type, badge_count in pairs(json.channel_badges) do
@@ -81,7 +108,7 @@ local function onResponse(status, body)
 	end
 
 	-- update the menu bar
-	updateCount(dmCount, activityCount)
+	updateCount(dmCount, activityCount, false)
 end
 
 -- timer callback, fetch response
