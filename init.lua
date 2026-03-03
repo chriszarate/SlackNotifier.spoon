@@ -51,8 +51,11 @@ local function tableToString(o)
 	end
 end
 
--- per-workspace counts: { [index] = { dmCount, activityCount, err } }
+-- per-workspace counts: { [index] = { dmCount, activityCount, starredActivity, err } }
 local counts = {}
+
+-- per-workspace starred channel IDs: { [index] = { [channelId] = true } }
+local starredChannels = {}
 
 -- aggregate counts across all workspaces and update the menu bar
 local function updateMenu()
@@ -60,11 +63,16 @@ local function updateMenu()
 	local totalActivity = 0
 	local allErr = true
 
+	local anyStarredActivity = false
+
 	for _, c in pairs(counts) do
 		if not c.err then
 			allErr = false
 			totalDm = totalDm + c.dmCount
 			totalActivity = totalActivity + c.activityCount
+			if c.starredActivity then
+				anyStarredActivity = true
+			end
 		end
 	end
 
@@ -72,7 +80,7 @@ local function updateMenu()
 		obj.menu:setIcon(dimmedIcon, true):setTitle('?')
 	elseif totalDm > 0 then
 		obj.menu:setIcon(activeIcon, true):setTitle(totalDm)
-	elseif totalActivity > 0 then
+	elseif totalActivity > 0 or anyStarredActivity then
 		obj.menu:setIcon(activeIcon, true):setTitle('')
 	else
 		obj.menu:setIcon(dimmedIcon, true):setTitle('')
@@ -82,9 +90,33 @@ end
 -- on click, clear the count
 local function onClick()
 	for i, _ in pairs(counts) do
-		counts[i] = { dmCount = 0, activityCount = 0, err = false }
+		counts[i] = { dmCount = 0, activityCount = 0, starredActivity = false, err = false }
 	end
 	updateMenu()
+end
+
+-- create a handler for stars.list response for a specific workspace index
+local function makeStarredHandler(index)
+	return function(status, body)
+		if status < 0 then
+			return
+		end
+
+		local json = hs.json.decode(body)
+
+		if not json.ok then
+			return
+		end
+
+		local starred = {}
+		for _, item in ipairs(json.items) do
+			if item.type == 'channel' then
+				starred[item.channel] = true
+			end
+		end
+
+		starredChannels[index] = starred
+	end
 end
 
 -- create a response handler for a specific workspace index
@@ -100,7 +132,7 @@ local function makeResponseHandler(index)
 		-- print('slack response:', tableToString(json))
 
 		if not json.ok then
-			counts[index] = { dmCount = 0, activityCount = 0, err = true }
+			counts[index] = { dmCount = 0, activityCount = 0, starredActivity = false, err = true }
 			print('SlackNotifier: workspace ' .. index .. ' error: ' .. json.error)
 			updateMenu()
 			return
@@ -124,21 +156,34 @@ local function makeResponseHandler(index)
 			end
 		end
 
-		counts[index] = { dmCount = dmCount, activityCount = activityCount, err = false }
+		-- check starred channels for unreads
+		local starredActivity = false
+		if json.channels and starredChannels[index] then
+			for _, channel in ipairs(json.channels) do
+				if starredChannels[index][channel.id] and channel.has_unreads then
+					starredActivity = true
+					break
+				end
+			end
+		end
+
+		counts[index] = { dmCount = dmCount, activityCount = activityCount, starredActivity = starredActivity, err = false }
 		updateMenu()
 	end
 end
 
 -- timer callback, fetch all workspaces
 local function onInterval()
-	local fetchUrl = 'https://slack.com/api/client.counts'
+	local countsUrl = 'https://slack.com/api/client.counts'
+	local starsUrl = 'https://slack.com/api/stars.list'
 
 	for i, workspace in ipairs(obj.workspaces) do
 		local data = 'token=' .. workspace.workspaceToken
 		local headers = {
 			Cookie = 'd=' .. hs.http.encodeForQuery(workspace.cookieToken)
 		}
-		hs.http.asyncPost(fetchUrl, data, headers, makeResponseHandler(i))
+		hs.http.asyncPost(starsUrl, data, headers, makeStarredHandler(i))
+		hs.http.asyncPost(countsUrl, data, headers, makeResponseHandler(i))
 	end
 end
 
@@ -171,7 +216,7 @@ function obj:start(config)
 	-- initialize per-workspace counts
 	counts = {}
 	for i = 1, #self.workspaces do
-		counts[i] = { dmCount = 0, activityCount = 0, err = false }
+		counts[i] = { dmCount = 0, activityCount = 0, starredActivity = false, err = false }
 	end
 
 	-- create menubar (or restore it)
