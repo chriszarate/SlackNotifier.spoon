@@ -15,6 +15,23 @@ Now load the spoon from your Hammerspoon config:
 ```lua
 hs.loadSpoon('SlackNotifier')
 spoon.SlackNotifier:start({
+  workspaces = {
+    {
+      cookieToken = "xoxd-xxxx",
+      workspaceToken = "xoxc-xxxx",
+    },
+    {
+      cookieToken = "xoxd-yyyy",
+      workspaceToken = "xoxc-yyyy",
+    },
+  },
+})
+```
+
+A single workspace can also be configured with the flat form:
+
+```lua
+spoon.SlackNotifier:start({
   cookieToken = "xoxd-xxxx",
   workspaceToken = "xoxc-xxxx",
 })
@@ -23,10 +40,16 @@ spoon.SlackNotifier:start({
 # Configuration
 
 - `interval`: Interval in seconds to refresh the menu (default 60)
-- `cookieToken`: Token found in your cookies when authenticated against your Slack workspace in the browser (required)
+- `workspaces`: Array of workspace tables, each containing `cookieToken` and `workspaceToken` (see below)
+
+For each workspace, you will need two tokens:
+
+- `cookieToken`: Token found in your cookies when authenticated against your Slack workspace in the browser
   - Using Chrome devtools, go to Application > Cookies > https://app.slack.com
   - Copy the value for `d`. It should start with `xoxd-`.
   - If it contains URL-encoded characters (`%..`), you will need to URL-decode it: `copy( encodeURIComponent( 'token' ) )`.
-- `workspaceToken`: Token found in request payload when authenticated against your Slack workspace in the browser (required).
+- `workspaceToken`: Token found in request payload when authenticated against your Slack workspace in the browser
   - Using Chrome devtools, go to Network, reload the page, and filter for `slack.com/api/`, select a `POST` request, and click the Payload tab.
   - Look for `token` in the payload. It should start with `xoxc-`.
+
+Counts from all workspaces are aggregated into a single menubar display.
