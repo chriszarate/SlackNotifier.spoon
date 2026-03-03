@@ -1,10 +1,7 @@
 --- === SlackNotifier ===
 ---
 --- Check Slack API periodically and provide a count of unread DMs and mentions
---- in a menubar app. This spoon requires a Slack legacy app token to be
---- provided to the :start method:
----
---- https://api.slack.com/legacy/custom-integrations/legacy-tokens
+--- in a menubar app. Supports multiple Slack workspaces.
 
 -- luacheck: globals hs
 
@@ -54,13 +51,28 @@ local function tableToString(o)
 	end
 end
 
--- update the menu bar
-local function updateCount(dmCount, activityCount, err)
-	if err then
+-- per-workspace counts: { [index] = { dmCount, activityCount, err } }
+local counts = {}
+
+-- aggregate counts across all workspaces and update the menu bar
+local function updateMenu()
+	local totalDm = 0
+	local totalActivity = 0
+	local allErr = true
+
+	for _, c in pairs(counts) do
+		if not c.err then
+			allErr = false
+			totalDm = totalDm + c.dmCount
+			totalActivity = totalActivity + c.activityCount
+		end
+	end
+
+	if allErr then
 		obj.menu:setIcon(dimmedIcon, true):setTitle('?')
-	elseif dmCount > 0 then
-		obj.menu:setIcon(activeIcon, true):setTitle(dmCount)
-	elseif activityCount > 0 then
+	elseif totalDm > 0 then
+		obj.menu:setIcon(activeIcon, true):setTitle(totalDm)
+	elseif totalActivity > 0 then
 		obj.menu:setIcon(activeIcon, true):setTitle('')
 	else
 		obj.menu:setIcon(dimmedIcon, true):setTitle('')
@@ -69,57 +81,65 @@ end
 
 -- on click, clear the count
 local function onClick()
-	updateCount(0, 0, false)
+	for i, _ in pairs(counts) do
+		counts[i] = { dmCount = 0, activityCount = 0, err = false }
+	end
+	updateMenu()
 end
 
--- process the response
-local function onResponse(status, body)
-	if status < 0 then
-		return
-	end
-
-	-- parse json response
-	local json = hs.json.decode(body)
-
-	-- print('slack response:', tableToString(json))
-
-	if not json.ok then
-		updateCount(0, 0, true)
-		print('SlackNotifier: error: ' .. json.error)
-		return
-	end
-
-	-- mentions and dms
-	local dmCount = 0
-
-	-- unread threads and reminders
-	local activityCount = 0
-	if (json.saved) then
-		activityCount = json.saved.uncompleted_overdue_count
-	end
-
-	-- loop through channel badges and add em up
-	for type, badge_count in pairs(json.channel_badges) do
-		if type == 'app_dms' or type == 'thread_unreads' then
-			activityCount = activityCount + badge_count
-		else
-			dmCount = dmCount + badge_count
+-- create a response handler for a specific workspace index
+local function makeResponseHandler(index)
+	return function(status, body)
+		if status < 0 then
+			return
 		end
-	end
 
-	-- update the menu bar
-	updateCount(dmCount, activityCount, false)
+		-- parse json response
+		local json = hs.json.decode(body)
+
+		-- print('slack response:', tableToString(json))
+
+		if not json.ok then
+			counts[index] = { dmCount = 0, activityCount = 0, err = true }
+			print('SlackNotifier: workspace ' .. index .. ' error: ' .. json.error)
+			updateMenu()
+			return
+		end
+
+		-- mentions and dms
+		local dmCount = 0
+
+		-- unread threads and reminders
+		local activityCount = 0
+		if json.saved then
+			activityCount = json.saved.uncompleted_overdue_count
+		end
+
+		-- loop through channel badges and add em up
+		for type, badge_count in pairs(json.channel_badges) do
+			if type == 'app_dms' or type == 'thread_unreads' then
+				activityCount = activityCount + badge_count
+			else
+				dmCount = dmCount + badge_count
+			end
+		end
+
+		counts[index] = { dmCount = dmCount, activityCount = activityCount, err = false }
+		updateMenu()
+	end
 end
 
--- timer callback, fetch response
+-- timer callback, fetch all workspaces
 local function onInterval()
-	local data = 'token=' .. obj.config.workspaceToken
-	local headers = {
-		Cookie = 'd=' .. hs.http.encodeForQuery(obj.config.cookieToken)
-	}
 	local fetchUrl = 'https://slack.com/api/client.counts'
 
-	hs.http.asyncPost(fetchUrl, data, headers, onResponse)
+	for i, workspace in ipairs(obj.workspaces) do
+		local data = 'token=' .. workspace.workspaceToken
+		local headers = {
+			Cookie = 'd=' .. hs.http.encodeForQuery(workspace.cookieToken)
+		}
+		hs.http.asyncPost(fetchUrl, data, headers, makeResponseHandler(i))
+	end
 end
 
 --- SlackNotifier:start(config)
@@ -128,15 +148,31 @@ end
 ---
 --- Parameters:
 ---  * config - A table containing config values:
---              interval: Interval in seconds to refresh the menu (default 60)
---              token:    Slack legacy API token (required)
+---             interval:   Interval in seconds to refresh the menu (default 60)
+---             workspaces: Array of { cookieToken, workspaceToken } tables
+---
+---             For a single workspace, cookieToken and workspaceToken can be
+---             provided directly on the config table instead.
 ---
 --- Returns:
 ---  * self (allow chaining)
 function obj:start(config)
-	self.config = config
-
 	local interval = config.interval or 60
+
+	-- support both flat (single workspace) and array (multi-workspace) configs
+	if config.workspaces then
+		self.workspaces = config.workspaces
+	else
+		self.workspaces = {
+			{ cookieToken = config.cookieToken, workspaceToken = config.workspaceToken }
+		}
+	end
+
+	-- initialize per-workspace counts
+	counts = {}
+	for i = 1, #self.workspaces do
+		counts[i] = { dmCount = 0, activityCount = 0, err = false }
+	end
 
 	-- create menubar (or restore it)
 	if self.menu then
