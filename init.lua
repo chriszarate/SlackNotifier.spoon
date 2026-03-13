@@ -87,12 +87,58 @@ local function updateMenu()
 	end
 end
 
--- on click, clear the count
-local function onClick()
-	for i, _ in pairs(counts) do
-		counts[i] = { dmCount = 0, activityCount = 0, starredActivity = false, err = false }
+-- build dropdown menu items
+local function buildMenu()
+	local items = {}
+
+	-- aggregate counts
+	local totalDm = 0
+	local allErr = true
+
+	for _, c in pairs(counts) do
+		if not c.err then
+			allErr = false
+			totalDm = totalDm + c.dmCount
+		end
 	end
-	updateMenu()
+
+	-- header: total
+	local headerTitle
+	if allErr then
+		headerTitle = '?'
+	elseif totalDm > 0 then
+		headerTitle = tostring(totalDm)
+	else
+		headerTitle = ''
+	end
+
+	table.insert(items, { title = headerTitle, disabled = true, image = activeIcon })
+	table.insert(items, { title = '-' })
+
+	-- per-workspace items
+	for i, workspace in ipairs(obj.workspaces) do
+		local c = counts[i]
+		local name = workspace.name or ('Workspace ' .. i)
+		local title, icon
+
+		if c.err then
+			title = '?  ' .. name
+			icon = dimmedIcon
+		elseif c.dmCount > 0 then
+			title = tostring(c.dmCount) .. '  ' .. name
+			icon = activeIcon
+		elseif c.activityCount > 0 or c.starredActivity then
+			title = name
+			icon = activeIcon
+		else
+			title = name
+			icon = dimmedIcon
+		end
+
+		table.insert(items, { title = title, disabled = true, image = icon })
+	end
+
+	return items
 end
 
 -- create a handler for stars.list response for a specific workspace index
@@ -194,10 +240,10 @@ end
 --- Parameters:
 ---  * config - A table containing config values:
 ---             interval:   Interval in seconds to refresh the menu (default 60)
----             workspaces: Array of { cookieToken, workspaceToken } tables
+---             workspaces: Array of { name, cookieToken, workspaceToken } tables
 ---
----             For a single workspace, cookieToken and workspaceToken can be
----             provided directly on the config table instead.
+---             For a single workspace, name, cookieToken, and workspaceToken
+---             can be provided directly on the config table instead.
 ---
 --- Returns:
 ---  * self (allow chaining)
@@ -209,7 +255,7 @@ function obj:start(config)
 		self.workspaces = config.workspaces
 	else
 		self.workspaces = {
-			{ cookieToken = config.cookieToken, workspaceToken = config.workspaceToken }
+			{ name = config.name, cookieToken = config.cookieToken, workspaceToken = config.workspaceToken }
 		}
 	end
 
@@ -223,7 +269,7 @@ function obj:start(config)
 	if self.menu then
 		self.menu:returnToMenuBar()
 	else
-		self.menu = hs.menubar.new():setClickCallback(onClick)
+		self.menu = hs.menubar.new():setMenu(buildMenu)
 	end
 
 	-- set timer to fetch periodically
