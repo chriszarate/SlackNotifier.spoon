@@ -37,6 +37,62 @@ local activeIcon = hs.image.imageFromASCII(iconAscii)
 local dimmedIcon = hs.image.imageFromASCII(iconAscii,
 	{ { fillColor = { alpha = 0.5 }, strokeColor = { alpha = 0.5 } } })
 
+-- category icons for dropdown menu
+local function createCanvasIcon(drawFn)
+	local size = 12
+	local c = hs.canvas.new({ x = 0, y = 0, w = size, h = size })
+	drawFn(c, size)
+	local img = c:imageFromCanvas()
+	c:delete()
+	return img:template(true)
+end
+
+local dmIcon = createCanvasIcon(function(c, s)
+	c[1] = {
+		type = 'segments',
+		closed = true,
+		coordinates = {
+			{ x = 1, y = 2 },
+			{ x = s - 1, y = 2 },
+			{ x = s - 1, y = s - 3 },
+			{ x = 5, y = s - 3 },
+			{ x = 3, y = s },
+			{ x = 3, y = s - 3 },
+			{ x = 1, y = s - 3 },
+		},
+		action = 'fill',
+		fillColor = { white = 0 },
+	}
+end)
+
+local starredIcon = createCanvasIcon(function(c, s)
+	local cx, cy, r = s / 2, s / 2, s / 2 - 1
+	local ir = r * 0.38
+	local coords = {}
+	for i = 0, 4 do
+		local oa = math.rad(-90 + i * 72)
+		table.insert(coords, { x = cx + r * math.cos(oa), y = cy + r * math.sin(oa) })
+		local ia = math.rad(-90 + i * 72 + 36)
+		table.insert(coords, { x = cx + ir * math.cos(ia), y = cy + ir * math.sin(ia) })
+	end
+	c[1] = {
+		type = 'segments',
+		closed = true,
+		coordinates = coords,
+		action = 'fill',
+		fillColor = { white = 0 },
+	}
+end)
+
+local activityMenuIcon = createCanvasIcon(function(c, s)
+	c[1] = {
+		type = 'oval',
+		frame = { x = 2, y = 2, w = s - 4, h = s - 4 },
+		action = 'fill',
+		fillColor = { white = 0 },
+	}
+end)
+
 -- debug helper
 local function tableToString(o)
 	if type(o) == 'table' then
@@ -51,7 +107,7 @@ local function tableToString(o)
 	end
 end
 
--- per-workspace counts: { [index] = { dmCount, activityCount, starredActivity, err } }
+-- per-workspace counts: { [index] = { dmCount, activityCount, starredCount, err } }
 local counts = {}
 
 -- per-workspace starred channel IDs: { [index] = { [channelId] = true } }
@@ -63,36 +119,87 @@ local function updateMenu()
 	local totalActivity = 0
 	local allErr = true
 
-	local anyStarredActivity = false
+	local totalStarred = 0
 
 	for _, c in pairs(counts) do
 		if not c.err then
 			allErr = false
 			totalDm = totalDm + c.dmCount
 			totalActivity = totalActivity + c.activityCount
-			if c.starredActivity then
-				anyStarredActivity = true
-			end
+			totalStarred = totalStarred + c.starredCount
 		end
 	end
 
 	if allErr then
+		obj.menu:returnToMenuBar()
 		obj.menu:setIcon(dimmedIcon, true):setTitle('?')
 	elseif totalDm > 0 then
+		obj.menu:returnToMenuBar()
 		obj.menu:setIcon(activeIcon, true):setTitle(totalDm)
-	elseif totalActivity > 0 or anyStarredActivity then
+	elseif totalActivity > 0 or totalStarred > 0 then
+		obj.menu:returnToMenuBar()
 		obj.menu:setIcon(activeIcon, true):setTitle('')
 	else
-		obj.menu:setIcon(dimmedIcon, true):setTitle('')
+		obj.menu:removeFromMenuBar()
 	end
 end
 
--- on click, clear the count
-local function onClick()
-	for i, _ in pairs(counts) do
-		counts[i] = { dmCount = 0, activityCount = 0, starredActivity = false, err = false }
+-- build dropdown menu items, grouped by category
+local function buildMenu()
+	local dmItems = {}
+	local starredItems = {}
+	local actItems = {}
+
+	for i, workspace in ipairs(obj.workspaces) do
+		local c = counts[i]
+		if not c.err then
+			local name = workspace.name or ('Workspace ' .. i)
+
+			if c.dmCount > 0 then
+				table.insert(dmItems, {
+					title = tostring(c.dmCount) .. '  ' .. name,
+					disabled = true,
+					image = dmIcon,
+				})
+			end
+
+			if c.starredCount > 0 then
+				table.insert(starredItems, {
+					title = tostring(c.starredCount) .. '  ' .. name,
+					disabled = true,
+					image = starredIcon,
+				})
+			end
+
+			if c.activityCount > 0 then
+				table.insert(actItems, {
+					title = tostring(c.activityCount) .. '  ' .. name,
+					disabled = true,
+					image = activityMenuIcon,
+				})
+			end
+		end
 	end
-	updateMenu()
+
+	-- combine sections with separators
+	local items = {}
+	local sections = { dmItems, starredItems, actItems }
+	for _, section in ipairs(sections) do
+		if #section > 0 then
+			if #items > 0 then
+				table.insert(items, { title = '-' })
+			end
+			for _, item in ipairs(section) do
+				table.insert(items, item)
+			end
+		end
+	end
+
+	if #items == 0 then
+		table.insert(items, { title = 'No new activity', disabled = true })
+	end
+
+	return items
 end
 
 -- create a handler for stars.list response for a specific workspace index
@@ -132,7 +239,7 @@ local function makeResponseHandler(index)
 		-- print('slack response:', tableToString(json))
 
 		if not json.ok then
-			counts[index] = { dmCount = 0, activityCount = 0, starredActivity = false, err = true }
+			counts[index] = { dmCount = 0, activityCount = 0, starredCount = 0, err = true }
 			print('SlackNotifier: workspace ' .. index .. ' error: ' .. json.error)
 			updateMenu()
 			return
@@ -156,18 +263,17 @@ local function makeResponseHandler(index)
 			end
 		end
 
-		-- check starred channels for unreads
-		local starredActivity = false
+		-- count starred channels with unreads
+		local starredCount = 0
 		if json.channels and starredChannels[index] then
 			for _, channel in ipairs(json.channels) do
 				if starredChannels[index][channel.id] and channel.has_unreads then
-					starredActivity = true
-					break
+					starredCount = starredCount + 1
 				end
 			end
 		end
 
-		counts[index] = { dmCount = dmCount, activityCount = activityCount, starredActivity = starredActivity, err = false }
+		counts[index] = { dmCount = dmCount, activityCount = activityCount, starredCount = starredCount, err = false }
 		updateMenu()
 	end
 end
@@ -194,10 +300,10 @@ end
 --- Parameters:
 ---  * config - A table containing config values:
 ---             interval:   Interval in seconds to refresh the menu (default 60)
----             workspaces: Array of { cookieToken, workspaceToken } tables
+---             workspaces: Array of { name, cookieToken, workspaceToken } tables
 ---
----             For a single workspace, cookieToken and workspaceToken can be
----             provided directly on the config table instead.
+---             For a single workspace, name, cookieToken, and workspaceToken
+---             can be provided directly on the config table instead.
 ---
 --- Returns:
 ---  * self (allow chaining)
@@ -209,21 +315,21 @@ function obj:start(config)
 		self.workspaces = config.workspaces
 	else
 		self.workspaces = {
-			{ cookieToken = config.cookieToken, workspaceToken = config.workspaceToken }
+			{ name = config.name, cookieToken = config.cookieToken, workspaceToken = config.workspaceToken }
 		}
 	end
 
 	-- initialize per-workspace counts
 	counts = {}
 	for i = 1, #self.workspaces do
-		counts[i] = { dmCount = 0, activityCount = 0, starredActivity = false, err = false }
+		counts[i] = { dmCount = 0, activityCount = 0, starredCount = 0, err = false }
 	end
 
 	-- create menubar (or restore it)
 	if self.menu then
 		self.menu:returnToMenuBar()
 	else
-		self.menu = hs.menubar.new():setClickCallback(onClick)
+		self.menu = hs.menubar.new():setMenu(buildMenu)
 	end
 
 	-- set timer to fetch periodically
