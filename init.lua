@@ -39,7 +39,7 @@ local dimmedIcon = hs.image.imageFromASCII(iconAscii,
 
 -- category icons for dropdown menu
 local function createCanvasIcon(drawFn)
-	local size = 16
+	local size = 12
 	local c = hs.canvas.new({ x = 0, y = 0, w = size, h = size })
 	drawFn(c, size)
 	local img = c:imageFromCanvas()
@@ -52,13 +52,13 @@ local dmIcon = createCanvasIcon(function(c, s)
 		type = 'segments',
 		closed = true,
 		coordinates = {
-			{ x = 1, y = 1 },
-			{ x = s - 1, y = 1 },
-			{ x = s - 1, y = s - 5 },
-			{ x = 6, y = s - 5 },
-			{ x = 3, y = s - 1 },
-			{ x = 3, y = s - 5 },
-			{ x = 1, y = s - 5 },
+			{ x = 1, y = 2 },
+			{ x = s - 1, y = 2 },
+			{ x = s - 1, y = s - 4 },
+			{ x = 5, y = s - 4 },
+			{ x = 3, y = s },
+			{ x = 3, y = s - 4 },
+			{ x = 1, y = s - 4 },
 		},
 		action = 'fill',
 		fillColor = { white = 0 },
@@ -131,13 +131,16 @@ local function updateMenu()
 	end
 
 	if allErr then
+		obj.menu:returnToMenuBar()
 		obj.menu:setIcon(dimmedIcon, true):setTitle('?')
 	elseif totalDm > 0 then
+		obj.menu:returnToMenuBar()
 		obj.menu:setIcon(activeIcon, true):setTitle(totalDm)
 	elseif totalActivity > 0 or totalStarred > 0 then
+		obj.menu:returnToMenuBar()
 		obj.menu:setIcon(activeIcon, true):setTitle('')
 	else
-		obj.menu:setIcon(dimmedIcon, true):setTitle('')
+		obj.menu:removeFromMenuBar()
 	end
 end
 
