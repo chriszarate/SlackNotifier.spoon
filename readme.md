@@ -1,7 +1,17 @@
 # Hammerspoon Slack notifier
 
 Check the Slack API periodically and provide a count of unread DMs and mentions
-in a menubar app. Click on the menubar icon to snooze.
+in a menubar app. Click on the menubar icon to see counts by workspace.
+
+The menu bar indicator is hidden while macOS Do Not Disturb is on. The spoon
+checks DND every two seconds and continues to fetch Slack counts while hidden.
+When DND ends, the indicator shows the current counts. Other Focus modes do not
+hide the indicator.
+
+DND detection reads `~/Library/DoNotDisturb/DB/Assertions.json`, a private macOS
+file whose format can change. Hammerspoon may need Full Disk Access to read it.
+If reading fails, the spoon logs a warning and keeps the last known DND state
+(off until the first successful read).
 
 ![screenshot](https://zthings.files.wordpress.com/2020/02/screen-shot-2020-02-09-at-11.17.33-pm.png)
 

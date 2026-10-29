@@ -113,8 +113,42 @@ local counts = {}
 -- per-workspace starred channel IDs: { [index] = { [channelId] = true } }
 local starredChannels = {}
 
+local dndActive = false
+local dndReadFailed = false
+local dndPath = os.getenv('HOME') .. '/Library/DoNotDisturb/DB/Assertions.json'
+
+-- This is a private macOS format. Keep the last known state on read errors.
+local function readDndState()
+	local ok, active = pcall(function()
+		local state = hs.json.read(dndPath)
+		assert(type(state) == 'table' and type(state.data) == 'table')
+		assert(type(state.data[1]) == 'table')
+		for _, store in ipairs(state.data) do
+			for _, record in ipairs(store.storeAssertionRecords or {}) do
+				local details = record.assertionDetails
+				if details and details.assertionDetailsModeIdentifier == 'com.apple.donotdisturb.mode.default' then
+					return true
+				end
+			end
+		end
+		return false
+	end)
+	if ok then
+		dndActive = active
+		dndReadFailed = false
+	elseif not dndReadFailed then
+		print('SlackNotifier: cannot read macOS DND state; keeping the last known state. Check Hammerspoon Full Disk Access.')
+		dndReadFailed = true
+	end
+end
+
 -- aggregate counts across all workspaces and update the menu bar
 local function updateMenu()
+	if not obj.running or dndActive then
+		obj.menu:removeFromMenuBar()
+		return
+	end
+
 	local totalDm = 0
 	local totalActivity = 0
 	local allErr = true
@@ -308,6 +342,7 @@ end
 --- Returns:
 ---  * self (allow chaining)
 function obj:start(config)
+	self:stop()
 	local interval = config.interval or 60
 
 	-- support both flat (single workspace) and array (multi-workspace) configs
@@ -331,6 +366,15 @@ function obj:start(config)
 	else
 		self.menu = hs.menubar.new():setMenu(buildMenu)
 	end
+	self.running = true
+	readDndState()
+	updateMenu()
+
+	-- Track DND independently of Slack requests, including when offline.
+	self.dndTimer = hs.timer.new(2, function()
+		readDndState()
+		updateMenu()
+	end):start()
 
 	-- set timer to fetch periodically
 	self.timer = hs.timer.new(interval, onInterval)
@@ -351,6 +395,11 @@ end
 --- Returns:
 ---  * self (allow chaining)
 function obj:stop()
+	self.running = false
+	if self.dndTimer then
+		self.dndTimer:stop()
+	end
+
 	if self.menu then
 		self.menu:removeFromMenuBar()
 	end
